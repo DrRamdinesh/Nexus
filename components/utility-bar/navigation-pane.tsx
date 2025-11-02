@@ -38,9 +38,9 @@ const SearchPane: React.FC<SearchPaneProps> = ({ projects, tasks, defects }) => 
         });
     }, [searchQuery, allItems]);
 
-    // FIX: Replaced `{} as Record<...>` with a generic on `reduce` for better type inference, resolving the 'unknown' type for `items`.
     const resultCategories = React.useMemo(() => {
-        return results.reduce<Record<string, SearchResult[]>>((acc, result) => {
+        // FIX: Explicitly type the accumulator in the reduce function to ensure type safety for `items`.
+        return results.reduce((acc: Record<string, SearchResult[]>, result) => {
             (acc[result.type] = acc[result.type] || []).push(result);
             return acc;
         }, {});

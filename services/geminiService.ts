@@ -386,3 +386,83 @@ export const generateDefectAnalysis = async (
         return "An unknown error occurred while generating the analysis.";
     }
 };
+
+export const performSmartSearch = async (
+  searchQuery: string,
+  dataContext: { projects: Project[]; tasks: Task[]; defects: Defect[] }
+): Promise<{ projectIds: string[]; taskIds: string[]; defectIds: string[] }> => {
+  if (!API_KEY) {
+    throw new Error("Gemini API key is not configured.");
+  }
+
+  const systemInstruction = `You are an intelligent search assistant for a project management application. Your task is to analyze a user's search query and a provided data context containing projects, tasks, and defects.
+  Identify and return the IDs of the items that are most relevant to the query. Relevance can be based on:
+  - Direct ID matches (e.g., "TASK-101").
+  - Keywords in titles (e.g., "budget" should match "Finalize Q3 budget").
+  - Conceptual understanding (e.g., "urgent items" might match tasks with "High" priority or defects with "Critical" severity).
+  - Vague terms (e.g., "performance issues" might match defects like "API timeout issue" or "Production login failure").
+  
+  Respond ONLY with a JSON object matching the provided schema. If no results are found for a category, return an empty array for it.`;
+
+  const prompt = `
+    CONTEXT DATA:
+    \`\`\`json
+    ${JSON.stringify(dataContext, null, 2)}
+    \`\`\`
+
+    USER'S SEARCH QUERY: "${searchQuery}"
+
+    Based on the context and the query, return a JSON object containing arrays of the original IDs for the most relevant projects, tasks, and defects.
+  `;
+
+  const schema = {
+    type: Type.OBJECT,
+    properties: {
+      projectIds: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: "An array of string IDs of projects relevant to the search query.",
+      },
+      taskIds: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: "An array of string IDs of tasks relevant to the search query.",
+      },
+      defectIds: {
+        type: Type.ARRAY,
+        items: { type: Type.STRING },
+        description: "An array of string IDs of defects relevant to the search query.",
+      },
+    },
+    required: ['projectIds', 'taskIds', 'defectIds'],
+  };
+
+  try {
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: [{ parts: [{ text: prompt }] }],
+      config: {
+        systemInstruction: systemInstruction,
+        temperature: 0.2, // Lower temperature for more deterministic search results
+        topP: 0.95,
+        responseMimeType: "application/json",
+        responseSchema: schema,
+      },
+    });
+
+    const jsonString = response.text;
+    const searchResults = JSON.parse(jsonString);
+    
+    // Validate the response structure
+    if (searchResults && Array.isArray(searchResults.projectIds) && Array.isArray(searchResults.taskIds) && Array.isArray(searchResults.defectIds)) {
+        return searchResults;
+    } else {
+        console.error("Invalid JSON structure from smart search:", searchResults);
+        return { projectIds: [], taskIds: [], defectIds: [] };
+    }
+
+  } catch (error) {
+    console.error("Error calling Gemini API for smart search:", error);
+    throw error;
+  }
+};

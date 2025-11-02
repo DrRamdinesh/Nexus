@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { NexusLogo, LogoutIcon, MagnifyingGlassIcon, ClockIcon } from '../constants';
+import { NexusLogo, LogoutIcon, MagnifyingGlassIcon, ClockIcon, SpinnerIcon } from '../constants';
 import type { Project, Task, Defect, UserProfile } from '../types';
+import { performSmartSearch } from '../services/geminiService';
 
 interface HeaderProps {
     username: string;
@@ -23,6 +24,8 @@ export const Header: React.FC<HeaderProps> = ({ username, userProfile, onLogout,
     const [isFocused, setIsFocused] = useState(false);
     const searchContainerRef = useRef<HTMLDivElement>(null);
     const [currentDate, setCurrentDate] = useState(new Date());
+    const [isSearching, setIsSearching] = useState(false);
+    const [searchError, setSearchError] = useState<string | null>(null);
 
     // Update the clock every minute
     useEffect(() => {
@@ -45,45 +48,59 @@ export const Header: React.FC<HeaderProps> = ({ username, userProfile, onLogout,
         };
     }, []);
 
-    // Debounced search effect
+    // Debounced AI search effect
     useEffect(() => {
         if (searchQuery.trim() === '') {
             setResults([]);
+            setSearchError(null);
             return;
         }
 
-        const handler = setTimeout(() => {
-            const lowercasedQuery = searchQuery.toLowerCase();
-            
-            const filteredProjects = projects
-                .filter(p => p.name.toLowerCase().includes(lowercasedQuery))
-                .map(item => ({ type: 'Project', item } as SearchResult));
+        const handler = setTimeout(async () => {
+            setIsSearching(true);
+            setSearchError(null);
+            try {
+                const searchDataContext = { projects, tasks, defects };
+                const { projectIds, taskIds, defectIds } = await performSmartSearch(searchQuery, searchDataContext);
 
-            const filteredTasks = tasks
-                .filter(t => 
-                    t.title.toLowerCase().includes(lowercasedQuery) ||
-                    t.project.toLowerCase().includes(lowercasedQuery)
-                )
-                .map(item => ({ type: 'Task', item } as SearchResult));
+                const projectsById = new Map(projects.map(p => [p.id, p]));
+                const tasksById = new Map(tasks.map(t => [t.id, t]));
+                const defectsById = new Map(defects.map(d => [d.id, d]));
 
-            const filteredDefects = defects
-                .filter(d => 
-                    d.title.toLowerCase().includes(lowercasedQuery) ||
-                    d.project.toLowerCase().includes(lowercasedQuery)
-                )
-                .map(item => ({ type: 'Defect', item } as SearchResult));
+                const foundProjects = projectIds
+                    .map(id => projectsById.get(id))
+                    .filter((p): p is Project => !!p)
+                    .map(item => ({ type: 'Project', item } as SearchResult));
 
-            setResults([...filteredProjects, ...filteredTasks, ...filteredDefects]);
-        }, 300); // 300ms debounce
+                const foundTasks = taskIds
+                    .map(id => tasksById.get(id))
+                    .filter((t): t is Task => !!t)
+                    .map(item => ({ type: 'Task', item } as SearchResult));
+
+                const foundDefects = defectIds
+                    .map(id => defectsById.get(id))
+                    .filter((d): d is Defect => !!d)
+                    .map(item => ({ type: 'Defect', item } as SearchResult));
+                
+                setResults([...foundProjects, ...foundTasks, ...foundDefects]);
+
+            } catch (error) {
+                console.error("AI Search failed:", error);
+                setSearchError("AI search is unavailable. Please try again later.");
+                setResults([]); 
+            } finally {
+                setIsSearching(false);
+            }
+        }, 500); // 500ms debounce for API call
 
         return () => {
             clearTimeout(handler);
         };
     }, [searchQuery, projects, tasks, defects]);
     
-    // FIX: Replaced `{} as Record<...>` with a generic on `reduce` for better type inference, resolving the 'unknown' type for `items`.
     const resultCategories = useMemo(() => {
-        return results.reduce<Record<string, SearchResult[]>>((acc, result) => {
+        // FIX: Explicitly type the accumulator in the reduce function to ensure type safety for `items`.
+        return results.reduce((acc: Record<string, SearchResult[]>, result) => {
             (acc[result.type] = acc[result.type] || []).push(result);
             return acc;
         }, {});
@@ -133,7 +150,7 @@ export const Header: React.FC<HeaderProps> = ({ username, userProfile, onLogout,
                             </div>
                             <input
                                 type="text"
-                                placeholder="Search projects, tasks, defects..."
+                                placeholder="Search with AI (e.g., 'urgent tasks for Phoenix')..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 onFocus={() => setIsFocused(true)}
@@ -142,7 +159,16 @@ export const Header: React.FC<HeaderProps> = ({ username, userProfile, onLogout,
                             />
                              {isFocused && searchQuery && (
                                 <div className="absolute mt-2 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-96 overflow-y-auto dark:bg-slate-800 dark:border-slate-700 z-50">
-                                   {results.length > 0 ? (
+                                   {isSearching ? (
+                                        <div className="p-4 flex items-center justify-center text-sm text-slate-500 dark:text-slate-400">
+                                            <SpinnerIcon className="w-5 h-5 mr-3" />
+                                            Nexa is thinking...
+                                        </div>
+                                    ) : searchError ? (
+                                        <div className="p-4 text-center text-sm text-red-500 dark:text-red-400">
+                                            {searchError}
+                                        </div>
+                                    ) : results.length > 0 ? (
                                         <div className="py-2">
                                             {Object.entries(resultCategories).map(([category, items]) => (
                                                 <div key={category}>

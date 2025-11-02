@@ -5,31 +5,37 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Nexus: AIfy.Predict.Deliver</title>
+    <script>
+      // IIFE to set the initial theme from localStorage or system preference
+      // This runs before the page is rendered to prevent a flash of incorrect theme.
+      (function() {
+        try {
+          const theme = localStorage.getItem('theme');
+          const systemPreference = window.matchMedia('(prefers-color-scheme: dark)');
+          if (theme === 'dark' || (!theme && systemPreference.matches)) {
+            document.documentElement.classList.add('dark');
+          }
+        } catch (e) {
+          console.error('Could not set initial theme', e);
+        }
+      })();
+    </script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+      }
+    </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       @import url('https://rsms.me/inter/inter.css');
       html { font-family: 'Inter', sans-serif; }
 
-      /* Added to enable smooth theme transitions */
-      body, div, header, main, nav, button, input, select, textarea {
-        transition-property: background-color, border-color;
-        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-        transition-duration: 200ms;
-      }
-      h1, h2, h3, h4, p, span, li, a, label {
-        transition-property: color;
-        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-        transition-duration: 200ms;
-      }
-      svg {
-        transition-property: fill, stroke;
-        transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-        transition-duration: 200ms;
-      }
-      /* Exclude progress bars from transitions to avoid visual lag on updates */
-      .progress-bar {
-        transition: none !important;
-      }
+      /* 
+        NOTE: Removed global transition rules as they were interfering with the
+        Tailwind Play CDN's ability to re-render styles on theme change.
+        Transitions can be re-added using Tailwind's utility classes
+        (e.g., `transition-colors`) on a per-component basis if desired.
+      */
 
       @keyframes pulse-highlight {
         0% {

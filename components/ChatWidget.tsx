@@ -1,12 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
-import type { ChatMessage, Task, AITaskSuggestion } from '../types';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import type { ChatMessage, Task, AITaskSuggestion, Defect } from '../types';
 import { TaskStatus } from '../types';
 import { generateChatResponse } from '../services/geminiService';
 import { SendIcon, UserIcon, AiIcon, PencilIcon, CheckCircleIcon } from '../constants';
 
 interface ChatWidgetProps {
     dataContext: object;
-    onSaveTask: (task: Omit<Task, 'id'> => void;
+    onSaveTask: (task: Omit<Task, 'id'>) => void;
     onEditTask: (taskData: Partial<Task>) => void;
 }
 
@@ -26,14 +26,13 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ dataContext, onSaveTask,
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const [suggestionStates, setSuggestionStates] = useState<Map<string, 'created' | 'dismissed'>>(new Map());
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
-
-    useEffect(() => {
-        scrollToBottom();
+    useLayoutEffect(() => {
+        // scrollIntoView is called after the DOM is updated but before the browser paints.
+        // This ensures that we scroll to the newly rendered message correctly.
+        // 'auto' behavior is instant, which is more reliable for chat UIs than 'smooth'.
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
     }, [messages]);
-    
+
     useEffect(() => {
         setMessages([
             {
@@ -61,7 +60,36 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ dataContext, onSaveTask,
         setIsLoading(true);
 
         try {
-            const aiResponseText = await generateChatResponse(userMessageText, dataContext);
+            const taskRegex = /\b(TASK-\d+)\b/i;
+            const defectRegex = /\b(DEF-\d+)\b/i;
+
+            const taskMatch = userMessageText.match(taskRegex);
+            const defectMatch = userMessageText.match(defectRegex);
+
+            // Create a mutable copy of the context to potentially augment it
+            const contextualDataContext = { ...dataContext };
+
+            if (taskMatch) {
+                const taskId = taskMatch[1].toUpperCase();
+                // The dataContext prop has a 'tasks' array. We need to cast it to access it.
+                const allTasks = (dataContext as any).tasks as Task[];
+                const referencedTask = allTasks.find((t: Task) => t.id.toUpperCase() === taskId);
+                if (referencedTask) {
+                    // Add the specific task to the context for the AI.
+                    (contextualDataContext as any).referencedItem = { type: 'Task', details: referencedTask };
+                }
+            } else if (defectMatch) {
+                const defectId = defectMatch[1].toUpperCase();
+                // The dataContext prop has a 'defects' array.
+                const allDefects = (dataContext as any).defects as Defect[];
+                const referencedDefect = allDefects.find((d: Defect) => d.id.toUpperCase() === defectId);
+                if (referencedDefect) {
+                    // Add the specific defect to the context for the AI.
+                    (contextualDataContext as any).referencedItem = { type: 'Defect', details: referencedDefect };
+                }
+            }
+
+            const aiResponseText = await generateChatResponse(userMessageText, contextualDataContext);
             
             const actionRegex = /\[ACTION:CREATE_TASK\]({.*})/s;
             const match = aiResponseText.match(actionRegex);
@@ -121,10 +149,10 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ dataContext, onSaveTask,
 
     return (
         <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg flex flex-col h-full shadow-lg">
-            <div className="p-4 border-b border-slate-200 dark:border-slate-700">
+            <div className="p-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
                 <h2 className="text-lg font-semibold text-slate-800 dark:text-white">Nexa</h2>
             </div>
-            <div className="flex-1 p-4 overflow-y-auto space-y-4">
+            <div className="flex-1 p-4 overflow-y-auto space-y-4 min-h-0">
                 {messages.map((msg) => {
                     const suggestionState = suggestionStates.get(msg.id);
                     const showSuggestion = msg.sender === 'ai' && msg.taskSuggestion && !suggestionState;
@@ -185,7 +213,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ dataContext, onSaveTask,
                          </div>
                      </div>
                 )}
-                {messages.length <= 1 && (
+                {messages.length <= 1 && !isLoading && (
                     <div className="space-y-2">
                         <p className="text-sm text-slate-500 dark:text-slate-400 mb-2">Try one of these:</p>
                         <PredefinedQueryButton query="Summarize the status of all projects." onQuery={handleSendMessage} />
@@ -196,7 +224,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ dataContext, onSaveTask,
                 <div ref={messagesEndRef} />
             </div>
 
-            <div className="p-4 border-t border-slate-200 dark:border-slate-700">
+            <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex-shrink-0">
                 <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }}>
                     <div className="relative">
                         <input
@@ -207,7 +235,7 @@ export const ChatWidget: React.FC<ChatWidgetProps> = ({ dataContext, onSaveTask,
                             className="w-full bg-slate-100 border border-slate-300 rounded-full py-2 pl-4 pr-12 text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 dark:bg-slate-700 dark:border-slate-600 dark:text-white dark:placeholder-slate-400"
                             disabled={isLoading}
                         />
-                        <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-indigo-600 hover:bg-indigo-500 transition-colors disabled:bg-slate-500" disabled={isLoading}>
+                        <button type="submit" className="absolute right-2 top-1/2 -translate-y-1/2 p-2 rounded-full bg-indigo-600 hover:bg-indigo-500 transition-colors disabled:bg-slate-500" disabled={isLoading || !input.trim()}>
                             <SendIcon className="w-5 h-5 text-white" />
                         </button>
                     </div>

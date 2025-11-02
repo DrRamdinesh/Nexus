@@ -87,9 +87,23 @@ export const TaskWidget: React.FC<TaskWidgetProps> = ({ title, allTasks, setTask
         };
     };
 
+    const handleToggleTaskCompletion = (taskId: string) => {
+        if (confirmationState) return;
+        
+        setTasks(prevTasks =>
+            prevTasks.map(task => {
+                if (task.id === taskId) {
+                    const newStatus = task.status === TaskStatus.Completed ? TaskStatus.Upcoming : TaskStatus.Completed;
+                    return { ...task, status: newStatus };
+                }
+                return task;
+            })
+        );
+    };
+
     const handleEditStart = (task: Task, field: 'title' | 'dueDate' | 'priority') => {
         const { blocked } = isTaskBlocked(task);
-        if (blocked || confirmationState) return; // Don't start a new edit if confirmation is pending or task is blocked
+        if (blocked || confirmationState || task.status === TaskStatus.Completed) return; // Don't start a new edit
         setEditingState({ taskId: task.id, field });
         setEditValue(task[field]);
     };
@@ -216,6 +230,7 @@ export const TaskWidget: React.FC<TaskWidgetProps> = ({ title, allTasks, setTask
                         {filteredTasks.length > 0 ? filteredTasks.map(task => {
                             const { blocked, reasons } = isTaskBlocked(task);
                             const isHighlighted = task.id === highlightedItemId;
+                            const isCompleted = task.status === TaskStatus.Completed;
 
                             return (
                                 <li 
@@ -228,10 +243,18 @@ export const TaskWidget: React.FC<TaskWidgetProps> = ({ title, allTasks, setTask
                                             itemRefs.current.delete(task.id);
                                         }
                                     }}
-                                    className={`p-3 rounded-md border-l-4 ${priorityColors[task.priority]} relative group transition-opacity ${blocked ? 'opacity-60 cursor-not-allowed' : 'bg-slate-50/50 dark:bg-slate-800/20'} ${isHighlighted ? 'animate-pulse-highlight' : ''}`}
+                                    className={`p-3 rounded-md border-l-4 ${priorityColors[task.priority]} relative group transition-all ${blocked ? 'opacity-60 cursor-not-allowed' : ''} ${isCompleted ? 'bg-slate-100 dark:bg-slate-700/50' : 'bg-slate-50/50 dark:bg-slate-800/20'} ${isHighlighted ? 'animate-pulse-highlight' : ''}`}
                                 >
                                     <div className="flex justify-between items-start">
                                         <div className="flex items-start space-x-3 flex-grow min-w-0">
+                                            <input
+                                                type="checkbox"
+                                                checked={isCompleted}
+                                                onChange={() => handleToggleTaskCompletion(task.id)}
+                                                disabled={blocked || !!confirmationState}
+                                                className="mt-1 h-5 w-5 rounded border-slate-400 dark:border-slate-500 text-indigo-600 focus:ring-indigo-500 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+                                                aria-label={`Mark task ${task.title} as ${isCompleted ? 'not completed' : 'completed'}`}
+                                            />
                                             {blocked && <LockIcon className="w-4 h-4 text-slate-400 dark:text-slate-500 flex-shrink-0 mt-0.5" />}
                                             <div className="flex-grow min-w-0">
                                                 {editingState?.taskId === task.id && editingState.field === 'title' ? (
@@ -247,7 +270,7 @@ export const TaskWidget: React.FC<TaskWidgetProps> = ({ title, allTasks, setTask
                                                 ) : (
                                                     <p
                                                         onClick={() => handleEditStart(task, 'title')}
-                                                        className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate ${!blocked ? 'cursor-pointer' : ''}`}
+                                                        className={`text-sm font-medium text-slate-800 dark:text-slate-200 truncate ${!blocked && !isCompleted ? 'cursor-pointer' : ''} ${isCompleted ? 'line-through text-slate-500 dark:text-slate-400' : ''}`}
                                                     >
                                                         {task.title}
                                                     </p>
@@ -268,7 +291,7 @@ export const TaskWidget: React.FC<TaskWidgetProps> = ({ title, allTasks, setTask
                                                      <div className="flex items-center space-x-2 mt-1">
                                                         <p
                                                             onClick={() => handleEditStart(task, 'priority')}
-                                                            className={`text-xs text-slate-500 dark:text-slate-400 ${!blocked ? 'cursor-pointer' : ''} truncate`}
+                                                            className={`text-xs text-slate-500 dark:text-slate-400 ${!blocked && !isCompleted ? 'cursor-pointer' : ''} truncate ${isCompleted ? 'line-through' : ''}`}
                                                             title={`${task.project} | ${task.assignedTo || 'Unassigned'} | ${task.priority}`}
                                                         >
                                                             <span>{task.project}</span>
@@ -295,7 +318,7 @@ export const TaskWidget: React.FC<TaskWidgetProps> = ({ title, allTasks, setTask
                                         ) : (
                                             <span
                                                 onClick={() => handleEditStart(task, 'dueDate')}
-                                                className={`text-xs text-slate-500 dark:text-slate-400 flex-shrink-0 ml-2 ${!blocked ? 'cursor-pointer' : ''}`}
+                                                className={`text-xs text-slate-500 dark:text-slate-400 flex-shrink-0 ml-2 ${!blocked && !isCompleted ? 'cursor-pointer' : ''} ${isCompleted ? 'line-through' : ''}`}
                                             >
                                                 {task.dueDate}
                                             </span>

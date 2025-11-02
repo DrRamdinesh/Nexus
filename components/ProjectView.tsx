@@ -1,8 +1,10 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import type { Project, Vendor, Task, Defect, ToolConfiguration, Tool } from '../types';
 import { ProjectStatus, TaskStatus, TaskPriority, DefectSeverity, ConnectionStatus } from '../types';
-import { ArrowLeftIcon, BugIcon, CheckCircleIcon, ExclamationCircleIcon, ListBulletIcon, ArrowPathIcon } from './utility-bar/icons';
+import { ArrowLeftIcon, BugIcon, CheckCircleIcon, ExclamationCircleIcon, ListBulletIcon, ArrowPathIcon, SparklesIcon } from './utility-bar/icons';
 import { getProjectDetails } from '../../services/toolService';
+import { generateProjectAnalysis } from '../../services/geminiService';
+import { SpinnerIcon } from '../constants';
 
 interface ProjectViewProps {
     project: Project;
@@ -57,13 +59,56 @@ const KPIStat: React.FC<{ icon: React.ReactNode; value: number | string; label: 
     </div>
 );
 
+const renderMarkdown = (text: string) => {
+    let html = text
+        .replace(/^### (.*$)/gim, '<h3 class="text-md font-semibold text-indigo-600 dark:text-indigo-400 mt-4 mb-2">$1</h3>')
+        .replace(/^- (.*$)/gim, '<li>$1</li>')
+        .replace(/^\* (.*$)/gim, '<li>$1</li>')
+        .replace(/^\d+\. (.*$)/gim, '<li>$1</li>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong class="font-semibold text-slate-800 dark:text-slate-200">$1</strong>')
+        .replace(/(\r\n|\n|\r)/gm, '<br>');
+
+    html = html.replace(/(<li>.*?<\/li>(?:<br>)*)+/gs, (match) => {
+        return `<ul class="list-disc list-inside space-y-1 pl-2 text-slate-700 dark:text-slate-300">${match.replace(/<br>/g, '')}</ul>`;
+    });
+
+    return <div className="text-sm leading-relaxed" dangerouslySetInnerHTML={{ __html: html }} />;
+};
+
 export const ProjectView: React.FC<ProjectViewProps> = ({ project, vendors, tasks, defects, onBack, toolConfigs, setProjects, setTasks, setDefects }) => {
     
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [refreshError, setRefreshError] = useState<string | null>(null);
+    
+    const [analysis, setAnalysis] = useState<string | null>(null);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+    const [analysisError, setAnalysisError] = useState<string | null>(null);
 
     const toolConfig = useMemo(() => toolConfigs.find(tc => tc.tool === project.tool), [toolConfigs, project.tool]);
     const canRefresh = useMemo(() => toolConfig && toolConfig.status === ConnectionStatus.Connected, [toolConfig]);
+    
+    const projectTasks = useMemo(() => tasks.filter(t => t.project === project.name), [tasks, project.name]);
+    const projectDefects = useMemo(() => defects.filter(d => d.project === project.name), [defects, project.name]);
+
+    const handleGenerateAnalysis = async () => {
+        setIsAnalyzing(true);
+        setAnalysis(null);
+        setAnalysisError(null);
+        try {
+            const context = {
+                project,
+                tasks: projectTasks,
+                defects: projectDefects,
+            };
+            const result = await generateProjectAnalysis(context);
+            setAnalysis(result);
+        } catch (e) {
+            setAnalysisError('Failed to generate analysis. Please try again.');
+            console.error(e);
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
     
     const handleRefresh = useCallback(async () => {
         if (!canRefresh || !toolConfig) {
@@ -113,8 +158,6 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ project, vendors, task
         handleRefresh();
     }, [handleRefresh]);
 
-    const projectTasks = useMemo(() => tasks.filter(t => t.project === project.name), [tasks, project.name]);
-    const projectDefects = useMemo(() => defects.filter(d => d.project === project.name), [defects, project.name]);
     const vendor = useMemo(() => vendors.find(v => v.id === project.vendorId), [vendors, project.vendorId]);
     
     const kpis = useMemo(() => {
@@ -203,6 +246,41 @@ export const ProjectView: React.FC<ProjectViewProps> = ({ project, vendors, task
                 <KPIStat icon={<ListBulletIcon className="w-8 h-8 text-indigo-500" />} value={kpis.totalTasks} label="Total Tasks" />
                 <KPIStat icon={<BugIcon className="w-8 h-8 text-amber-500" />} value={kpis.openDefects} label="Open Defects" />
                 <KPIStat icon={<ExclamationCircleIcon className="w-8 h-8 text-red-500" />} value={kpis.overdueTasks} label="Overdue Tasks" />
+            </div>
+
+            {/* AI Project Analysis */}
+            <div>
+                <div className="flex items-center space-x-2 mb-2">
+                    <SparklesIcon className="w-6 h-6 text-slate-500" />
+                    <h2 className="text-xl font-semibold text-slate-700 dark:text-slate-300">AI Project Analysis</h2>
+                </div>
+                <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-4 min-h-[8rem] flex flex-col justify-center">
+                    {isAnalyzing ? (
+                        <div className="flex items-center justify-center text-slate-500 dark:text-slate-400">
+                            <SpinnerIcon className="w-6 h-6 mr-3" />
+                            <span className="text-sm">Nexa is analyzing the project data...</span>
+                        </div>
+                    ) : analysisError ? (
+                        <div className="text-center p-4">
+                            <p className="text-red-600 mb-4">{analysisError}</p>
+                            <button onClick={handleGenerateAnalysis} className="text-sm font-semibold text-indigo-600">Try Again</button>
+                        </div>
+                    ) : analysis ? (
+                         <div className="space-y-4">
+                            {renderMarkdown(analysis)}
+                             <div className="text-center mt-4">
+                                <button onClick={handleGenerateAnalysis} className="text-xs font-semibold text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400">Re-generate</button>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="text-center">
+                            <button onClick={handleGenerateAnalysis} className="inline-flex items-center justify-center text-sm font-semibold px-4 py-2 rounded-md transition-colors bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-indigo-900/50 dark:hover:bg-indigo-900 dark:text-indigo-300">
+                                <SparklesIcon className="w-5 h-5 mr-2" />
+                                Generate AI Analysis
+                            </button>
+                        </div>
+                    )}
+                </div>
             </div>
 
             {/* Tasks and Defects Columns */}
